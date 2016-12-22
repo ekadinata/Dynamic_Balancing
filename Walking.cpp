@@ -17,6 +17,17 @@ using namespace Robot;
 
 
 #define PI (3.14159265)
+//FOR DYNAMIC
+#define KICK_STRENGTH   35.0 //55.0     //EDIT FOR DYNAMIC KICK
+
+//initialize filtering  Accel Gyro
+double fbAccelFilter = MotionStatus::FB_ACCEL;
+double rlAccelFilter = MotionStatus::RL_ACCEL;
+double fbAccelFilter2 = MotionStatus::FB_ACCEL;
+double rlAccelFilter2 = MotionStatus::RL_ACCEL;
+double fbGyroFilter = MotionStatus::FB_GYRO;
+double rlGyroFilter = MotionStatus::RL_GYRO;
+
 
 Walking* Walking::m_UniqueInstance = new Walking();
 
@@ -46,18 +57,30 @@ Walking::Walking()
     I_GAIN = JointData::I_GAIN_DEFAULT;
     D_GAIN = JointData::D_GAIN_DEFAULT;
 
+    //edited for odometri tuning
+
+    X_MOVE_SCALE = 2.4f;
+    Y_MOVE_SCALE = 1.1f;
+    A_MOVE_SCALE = 1.4f;
+
+    X_MOVE_COUNTER = 0;
+    Y_MOVE_COUNTER = 0;
+    A_MOVE_COUNTER = 0;
+
 	X_MOVE_AMPLITUDE = 0;
 	Y_MOVE_AMPLITUDE = 0;
 	A_MOVE_AMPLITUDE = 0;	
 	A_MOVE_AIM_ON = false;
 	BALANCE_ENABLE = true;
 
-	m_Joint.SetAngle(JointData::ID_R_SHOULDER_PITCH, -48.345);
-	m_Joint.SetAngle(JointData::ID_L_SHOULDER_PITCH, 41.313);
+    X_KICK_AMPLITUDE = 0;       // EDIT FOR DYNAMIC KICKING
+
+	//m_Joint.SetAngle(JointData::ID_R_SHOULDER_PITCH, -48.345);
+	//m_Joint.SetAngle(JointData::ID_L_SHOULDER_PITCH, 41.313);
 	m_Joint.SetAngle(JointData::ID_R_SHOULDER_ROLL, -17.873);
     m_Joint.SetAngle(JointData::ID_L_SHOULDER_ROLL, 17.580);
-	m_Joint.SetAngle(JointData::ID_R_ELBOW, 29.300);
-	m_Joint.SetAngle(JointData::ID_L_ELBOW, -29.593);
+	//m_Joint.SetAngle(JointData::ID_R_ELBOW, 29.300);
+	//m_Joint.SetAngle(JointData::ID_L_ELBOW, -29.593);
 
 	m_Joint.SetAngle(JointData::ID_HEAD_TILT, Kinematics::EYE_TILT_OFFSET_ANGLE);
 
@@ -75,6 +98,11 @@ Walking::Walking()
     m_Joint.SetPGain(JointData::ID_L_SHOULDER_ROLL, 8);
     m_Joint.SetPGain(JointData::ID_R_ELBOW, 8);
     m_Joint.SetPGain(JointData::ID_L_ELBOW, 8);
+
+    StepCount = 0;      //EDIT FOR STEP COUNTING
+    StartCount = false; //EDIT FOR STEP COUNTING
+
+    //  Z_MOVE_AMPLITUDE = 40;
 }
 
 Walking::~Walking()
@@ -140,6 +168,11 @@ void Walking::SaveINISettings(minIni* ini, const std::string &section)
     ini->put(section,   "balance_ankle_pitch_gain", BALANCE_ANKLE_PITCH_GAIN);
     ini->put(section,   "balance_hip_roll_gain",    BALANCE_HIP_ROLL_GAIN);
     ini->put(section,   "balance_ankle_roll_gain",  BALANCE_ANKLE_ROLL_GAIN);
+
+    //edit for odometri tuning
+    ini->put(section,   "x_move_scale",             X_MOVE_SCALE);
+    ini->put(section,   "y_move_scale",             Y_MOVE_SCALE);
+    ini->put(section,   "a_move_scale",             A_MOVE_SCALE);
 
     ini->put(section,   "p_gain",                   P_GAIN);
     ini->put(section,   "i_gain",                   I_GAIN);
@@ -273,12 +306,22 @@ void Walking::update_param_move()
         m_Y_Move_Amplitude_Shift = -m_Y_Move_Amplitude;
     m_Y_Swap_Amplitude = Y_SWAP_AMPLITUDE + m_Y_Move_Amplitude_Shift * 0.04;
 
-    m_Z_Move_Amplitude = Z_MOVE_AMPLITUDE / 2;
-    m_Z_Move_Amplitude_Shift = m_Z_Move_Amplitude / 2;
-    m_Z_Swap_Amplitude = Z_SWAP_AMPLITUDE;
-    m_Z_Swap_Amplitude_Shift = m_Z_Swap_Amplitude;
-
-    // Direction
+    //tambahan gerakan
+    if (X_MOVE_AMPLITUDE > 30.0)
+    {
+       compensator = (X_MOVE_AMPLITUDE / 30);
+       m_Z_Move_Amplitude = Z_MOVE_AMPLITUDE * compensator/ 2;
+        m_Z_Move_Amplitude_Shift = m_Z_Move_Amplitude / 2;
+        m_Z_Swap_Amplitude = Z_SWAP_AMPLITUDE * compensator;
+        m_Z_Swap_Amplitude_Shift = m_Z_Swap_Amplitude;
+    }
+    else
+        m_Z_Move_Amplitude = Z_MOVE_AMPLITUDE / 2;
+        m_Z_Move_Amplitude_Shift = m_Z_Move_Amplitude / 2;
+        m_Z_Swap_Amplitude = Z_SWAP_AMPLITUDE;
+        m_Z_Swap_Amplitude_Shift = m_Z_Swap_Amplitude;
+    
+    // Direction -> kalau aim true, arahnya putar kebalik
     if(A_MOVE_AIM_ON == false)
     {
         m_A_Move_Amplitude = A_MOVE_AMPLITUDE * PI / 180.0 / 2;
@@ -334,6 +377,9 @@ void Walking::Initialize()
     update_param_time();
     update_param_move();
 
+    m_Right_Kick = false;   //EDITED FOR DYNAMIC KICKING
+    m_Left_Kick = false;    //EDITTED FOR DYNAMIC KICKING
+    Compass = false;
     Process();
 }
 
@@ -353,19 +399,54 @@ bool Walking::IsRunning()
 	return m_Real_Running;
 }
 
+//EDITED FOR DYNAMIC KICKING
+void Walking::RightKick()
+{
+    m_Right_Kick = true;
+}
+
+void Walking::CompassEnable()
+{
+    Compass = true;
+}
+
+void Walking::CompassDisable()
+{
+    Compass = false;
+}
+
+void Walking::LeftKick()
+{
+    m_Left_Kick = true;
+
+}
+
+void Walking::NoKick()
+{
+    m_Left_Kick = false;
+    m_Right_Kick = false;
+    
+}
+//==============END===========
+
 void Walking::Process()
 {
 	double x_swap, y_swap, z_swap, a_swap, b_swap, c_swap;
     double x_move_r, y_move_r, z_move_r, a_move_r, b_move_r, c_move_r;
     double x_move_l, y_move_l, z_move_l, a_move_l, b_move_l, c_move_l;
     double pelvis_offset_r, pelvis_offset_l;
-    double angle[14], ep[12];
+    double angle[16], ep[12];
 	double offset;
 	double TIME_UNIT = MotionModule::TIME_UNIT;
 	//                     R_HIP_YAW, R_HIP_ROLL, R_HIP_PITCH, R_KNEE, R_ANKLE_PITCH, R_ANKLE_ROLL, L_HIP_YAW, L_HIP_ROLL, L_HIP_PITCH, L_KNEE, L_ANKLE_PITCH, L_ANKLE_ROLL, R_ARM_SWING, L_ARM_SWING
-	int dir[14]          = {   -1,        -1,          1,         1,         -1,            1,          -1,        -1,         -1,         -1,         1,            1,           1,           -1      };
-    double initAngle[14] = {   0.0,       0.0,        0.0,       0.0,        0.0,          0.0,         0.0,       0.0,        0.0,        0.0,       0.0,          0.0,       -48.345,       41.313    };
-	int outValue[14];
+	int dir[16]          = {   -1,        -1,          1,         1,         -1,            1,          -1,        -1,         -1,         -1,         1,            1,           1,           -1      ,  1,      1    };
+    double initAngle[16] = {   0.0,       0.0,        0.0,       0.0,        0.0,          0.0,         0.0,       0.0,        0.0,        0.0,       0.0,          0.0,       -48.345,       41.313   , 0.0,    0.0   };
+	int outValue[16];
+    double arm_raise;
+    //EDITTED FOR DYNAMIC KICKING
+    static bool m_RK_Flag = false;
+    static bool m_LK_Flag = false;
+    //============================
 
     // Update walk parameters
     if(m_Time == 0)
@@ -388,8 +469,45 @@ void Walking::Process()
     }
     else if(m_Time >= (m_Phase_Time1 - TIME_UNIT/2) && m_Time < (m_Phase_Time1 + TIME_UNIT/2))
     {
-        update_param_move();
-        m_Phase = PHASE1;
+        //EDITTED FOR DYNAMIC KICKING
+        if (m_Right_Kick && !m_RK_Flag)
+        {
+            X_KICK_AMPLITUDE = KICK_STRENGTH;   //langkah tendangan
+            m_RK_Flag = true;
+        }
+        
+        update_param_move(); //NOT EDITED
+        
+        if (m_RK_Flag || m_LK_Flag)
+        {
+            //update moving parameter manually
+            X_MOVE_AMPLITUDE = X_KICK_AMPLITUDE;    
+            m_X_Move_Amplitude = X_MOVE_AMPLITUDE;
+            m_X_Swap_Amplitude = X_MOVE_AMPLITUDE * STEP_FB_RATIO; 
+            
+            if (X_KICK_AMPLITUDE == KICK_STRENGTH)
+            {
+                m_Z_Move_Amplitude = (Z_MOVE_AMPLITUDE + 15) / 2;
+                m_Z_Move_Amplitude_Shift = m_Z_Move_Amplitude / 2;
+            }
+            
+            if (X_KICK_AMPLITUDE <= 5.0)
+            {   
+                m_Right_Kick = false;
+                m_RK_Flag = false;
+                m_Left_Kick = false;
+                m_LK_Flag = false;
+            }
+            else
+                X_KICK_AMPLITUDE = X_KICK_AMPLITUDE - 10.0;
+        }
+        //============================
+        m_Phase = PHASE1; //NOT EDITED
+
+        // ODOMETRY VALUE UPDATE
+        m_X_Moved = m_X_Moved + m_X_Move_Amplitude;
+        m_Y_Moved = m_Y_Moved + m_Y_Move_Amplitude;
+        m_A_Moved = m_A_Moved + m_A_Move_Amplitude;
     }
     else if(m_Time >= (m_Phase_Time2 - TIME_UNIT/2) && m_Time < (m_Phase_Time2 + TIME_UNIT/2))
     {
@@ -412,8 +530,52 @@ void Walking::Process()
     }
     else if(m_Time >= (m_Phase_Time3 - TIME_UNIT/2) && m_Time < (m_Phase_Time3 + TIME_UNIT/2))
     {
-        update_param_move();
+        //EDITTED FOR STEP COUNTING
+        if(StartCount)
+                StepCount++;
+        else
+                StepCount = 0;
+        //=========================
+
+        //EDITTE FOR DYNAMIC KICKING
+        if (m_Left_Kick && !m_LK_Flag)
+        {
+            X_KICK_AMPLITUDE = KICK_STRENGTH;   //langkah tendangan
+            m_LK_Flag = true;
+        
+        }
+        update_param_move(); //NOT EDITED
+        if (m_RK_Flag || m_LK_Flag)
+        {
+            //update moving parameter manually
+            X_MOVE_AMPLITUDE = X_KICK_AMPLITUDE;    
+            m_X_Move_Amplitude = X_MOVE_AMPLITUDE;
+            m_X_Swap_Amplitude = X_MOVE_AMPLITUDE * STEP_FB_RATIO; 
+            
+            if (X_KICK_AMPLITUDE == KICK_STRENGTH)
+            {
+                m_Z_Move_Amplitude = (Z_MOVE_AMPLITUDE + 15) / 2;
+                m_Z_Move_Amplitude_Shift = m_Z_Move_Amplitude / 2;
+            }
+            
+            if (X_KICK_AMPLITUDE <= 5.0)
+            {   
+                m_Right_Kick = false;
+                m_RK_Flag = false;
+                m_Left_Kick = false;
+                m_LK_Flag = false;
+            }
+            else
+            X_KICK_AMPLITUDE = X_KICK_AMPLITUDE - 10.0;
+        }
+        //=============================================
         m_Phase = PHASE3;
+
+        // ODOMETRY VALUE UPDATE
+        m_X_Moved = m_X_Moved + m_X_Move_Amplitude;
+        m_Y_Moved = m_Y_Moved + m_Y_Move_Amplitude;
+        m_A_Moved = m_A_Moved + m_A_Move_Amplitude;
+        //=========================================
     }
     update_param_balance();
 
@@ -534,6 +696,21 @@ void Walking::Process()
         angle[13] = wsin(m_Time, m_PeriodTime, PI * 1.5, m_X_Move_Amplitude * m_Arm_Swing_Gain, 0);
     }
 
+    if(m_Y_Move_Amplitude == 0)
+    {
+        angle[14] =  -10; //Right
+        angle[15] = 10; //Left
+    }
+    else
+    {
+        m_Joint.SetAngle(JointData::ID_R_ELBOW, 5.300);     //  2940);          //Angle 29.300);
+        m_Joint.SetAngle(JointData::ID_L_ELBOW, -5.300);        //  2940);          //Angle 29.300);
+        angle[12] = 10;
+        angle[13] = 10;
+        angle[14] = wsin(m_Time, m_PeriodTime, PI * 1.5, -m_Y_Move_Amplitude * m_Arm_Swing_Gain, 0);
+        angle[15] = wsin(m_Time, m_PeriodTime, PI * 1.5, -m_Y_Move_Amplitude * m_Arm_Swing_Gain, 0);
+    }
+
     if(m_Real_Running == true)
     {
         m_Time += TIME_UNIT;
@@ -572,6 +749,34 @@ void Walking::Process()
     {
 		double rlGyroErr = MotionStatus::RL_GYRO;
 		double fbGyroErr = MotionStatus::FB_GYRO;
+
+        //for filtering gyro
+        double RAWfbGyro = MotionStatus::FB_GYRO;
+        double RAWrlGyro = MotionStatus::RL_GYRO;
+        double GyroFilterConst = 0.1;
+
+        //for filtering accelerometer
+        double RAWfbAccel = MotionStatus::FB_ACCEL;
+        double RAWrlAccel = MotionStatus::RL_ACCEL;
+        double AccelFilter1Const = 0.1;
+        double AccelFilter2Const = 0.1;
+
+        //filtering gyro
+        fbGyroFilter = fbGyroFilter + (RAWfbGyro - fbGyroFilter) * GyroFilterConst;
+        rlGyroFilter = rlGyroFilter + (RAWrlGyro - rlGyroFilter) * GyroFilterConst;
+
+        //filtering accelerometer
+        //2 step filtering
+        //step 1
+        fbAccelFilter = (fbAccelFilter + (RAWfbAccel - fbAccelFilter) * AccelFilter1Const) - (500 * AccelFilter1Const);
+        rlAccelFilter = (rlAccelFilter + (RAWrlAccel - rlAccelFilter) * AccelFilter1Const) - (500 * AccelFilter1Const);
+        //untuk transl$
+        //step 2
+        fbAccelFilter2 = (fbAccelFilter2 + (fbAccelFilter - fbAccelFilter2) * AccelFilter2Const);
+        rlAccelFilter2 = (rlAccelFilter2 + (rlAccelFilter - rlAccelFilter2) * AccelFilter2Const);
+
+
+
 #ifdef MX28_1024
         outValue[1] += (int)(dir[1] * rlGyroErr * BALANCE_HIP_ROLL_GAIN); // R_HIP_ROLL
         outValue[7] += (int)(dir[7] * rlGyroErr * BALANCE_HIP_ROLL_GAIN); // L_HIP_ROLL
@@ -596,6 +801,24 @@ void Walking::Process()
 
 		outValue[5] -= (int)(dir[5] * rlGyroErr * BALANCE_ANKLE_ROLL_GAIN*4); // R_ANKLE_ROLL
         outValue[11] -= (int)(dir[11] * rlGyroErr * BALANCE_ANKLE_ROLL_GAIN*4); // L_ANKLE_ROLL
+
+        //compute arm pitch feedback
+        outValue[13] = (-10 * fbGyroFilter) - (fbAccelFilter2 * 8) + 2050;
+        outValue[12] = (10 * fbGyroFilter) + (fbAccelFilter2 * 8) + 2000;
+
+        //compute arm roll feedback
+        outValue[14] = (10 * rlGyroFilter) + ((rlAccelFilter2) * 8) + 1840;
+        outValue[15] = (10 * rlGyroFilter) + ((rlAccelFilter2) * 8) + 2240;
+        if (outValue[14] < 1735)
+              outValue[15] = 1735;
+        if (outValue[15] > 2400)
+              outValue[14] = 2400;
+
+        m_Joint.SetValue(JointData::ID_R_ELBOW, 1450);
+        m_Joint.SetValue(JointData::ID_L_ELBOW, 2550);
+
+        m_Joint.SetValue(JointData::ID_R_ELBOW, 1650);
+        m_Joint.SetValue(JointData::ID_L_ELBOW, 2548);
 #endif
     }
 
@@ -613,6 +836,8 @@ void Walking::Process()
 	m_Joint.SetValue(JointData::ID_L_ANKLE_ROLL,        outValue[11]);
 	m_Joint.SetValue(JointData::ID_R_SHOULDER_PITCH,    outValue[12]);
 	m_Joint.SetValue(JointData::ID_L_SHOULDER_PITCH,    outValue[13]);
+    m_Joint.SetValue(JointData::ID_R_SHOULDER_ROLL,     outValue[14]);
+    m_Joint.SetValue(JointData::ID_L_SHOULDER_ROLL,     outValue[15]);
 	m_Joint.SetAngle(JointData::ID_HEAD_PAN, A_MOVE_AMPLITUDE);
 
 	for(int id = JointData::ID_R_HIP_YAW; id <= JointData::ID_L_ANKLE_ROLL; id++)
@@ -622,3 +847,7 @@ void Walking::Process()
         m_Joint.SetDGain(id, D_GAIN);
 	}
 }
+
+double Walking::Get_X_Moved()  { double temp_X_Moved = m_X_Moved * X_MOVE_SCALE; m_X_Moved = 0; return temp_X_Moved; } //dalam mm
+double Walking::Get_Y_Moved()  { double temp_Y_Moved = m_Y_Moved * Y_MOVE_SCALE; m_Y_Moved = 0; return temp_Y_Moved; } // dalam mm
+double Walking::Get_A_Moved()  { double temp_A_Moved = m_A_Moved / A_MOVE_SCALE; m_A_Moved = 0; return temp_A_Moved; } //dalam rad
