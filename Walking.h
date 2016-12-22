@@ -32,6 +32,11 @@ namespace Robot
 	private:
 		static Walking* m_UniqueInstance;
 
+		// EDITTING FOR STEP COUNTING
+		int StepCount;
+		bool StartCount;
+		//===========================
+
 		double m_PeriodTime;
 		double m_DSP_Ratio;
 		double m_SSP_Ratio;
@@ -93,6 +98,18 @@ namespace Robot
 		double m_Body_Swing_Y;
 		double m_Body_Swing_Z;
 
+		// EDITTING FOR ODOMETRY
+		double m_X_Moved;
+		double m_Y_Moved;
+		double m_A_Moved;
+		//======================
+
+		// EDITING FOR DYNAMIC KICKING
+        bool m_Right_Kick;
+        bool m_Left_Kick;
+		bool Compass;
+		//============================
+
         Walking();
 
 		double wsin(double time, double period, double period_shift, double mag, double mag_shift);
@@ -132,6 +149,17 @@ namespace Robot
 		double PELVIS_OFFSET;
 		double HIP_PITCH_OFFSET;
 
+		// DYNAMIC KICK CONTROL
+        double X_KICK_AMPLITUDE;
+		//======================
+
+		double X_MOVE_SCALE;
+		double Y_MOVE_SCALE;
+		double A_MOVE_SCALE;
+		double X_MOVE_COUNTER;
+		double Y_MOVE_COUNTER;
+		double A_MOVE_COUNTER;
+
 		int    P_GAIN;
 		int    I_GAIN;
 		int    D_GAIN;
@@ -139,6 +167,12 @@ namespace Robot
 		int GetCurrentPhase()		{ return m_Phase; }
 		double GetBodySwingY()		{ return m_Body_Swing_Y; }
 		double GetBodySwingZ()		{ return m_Body_Swing_Z; }
+
+		// EDITTED FOR ODOMETRY
+		double Get_X_Moved();  //dalam mm
+		double Get_Y_Moved();  // dalam mm
+		double Get_A_Moved();  //dalam rad
+		//===============================
 
 		virtual ~Walking();
 
@@ -149,6 +183,20 @@ namespace Robot
 		void Stop();
 		void Process();
 		bool IsRunning();
+
+		// ADDITIONAL FOR DYNAMIC KICKING
+        void RightKick();
+        void LeftKick();
+        void NoKick();
+		void CompassEnable();
+		void CompassDisable();
+		//===============================
+
+		// EDITTED FOR STEP COUNTER
+		int get_walking_step() { return StepCount; }
+		void start_counting_step() { StartCount = true; StepCount = 0; }
+		void stop_counting_step() { StartCount = false; }
+		//===============================
 
         void LoadINISettings(minIni* ini);
         void LoadINISettings(minIni* ini, const std::string &section);
